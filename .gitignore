@@ -1,0 +1,36 @@
+node_modules
+# dependencies
+node_modules
+
+# next build
+.next
+out
+
+# vercel project linkage (created by `vercel link`/`vercel pull`)
+.vercel
+
+# env
+.env
+.env.local
+**/.env
+**/.env.*
+!.env.example
+
+# prisma
+prisma/dev.db
+*.db
+
+# logs
+npm-debug.log*
+build.log
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+/generated/prisma
+
+# Appended by `vercel link`. The negation has to be repeated *after* it:
+# gitignore applies the last matching pattern, so `.env*` alone would
+# re-ignore the committed template despite the `!.env.example` above.
+.env*
+!.env.example

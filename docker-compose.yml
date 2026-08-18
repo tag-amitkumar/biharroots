@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: naturecart
+      POSTGRES_PASSWORD: naturecart
+      POSTGRES_DB: naturecart
+    # Published on a non-default host port so `npm run dev` on the host can
+    # reach it (see DATABASE_URL in .env) without colliding with any Postgres
+    # already installed locally on 5432.
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U naturecart -d naturecart"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever DATABASE_URL/DIRECT_URL are in .env so the
+      # container talks to the `db` service above rather than to whatever
+      # hosted Postgres a developer happens to have configured locally.
+      # There is no connection pooler in front of this one, so both point at
+      # the same place.
+      - DATABASE_URL=postgresql://naturecart:naturecart@db:5432/naturecart
+      - DIRECT_URL=postgresql://naturecart:naturecart@db:5432/naturecart
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

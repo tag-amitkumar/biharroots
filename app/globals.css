@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-manrope);
+
+  /* Warm leaf green rather than the previous emerald: the catalog is
+     sun-dried farm staples - sattu, whole turmeric, dried moringa - and a
+     minty/neon green read as chilled supermarket produce. brand-600 is the
+     accent used for buttons, links and eyebrow text; it sits at 5.03:1 on
+     the light canvas and against white, so it stays AA-legible as both a
+     text colour and a button fill. brand-800 is the deep leaf used for
+     headings and dark surfaces. */
+  --color-brand-50: #f4f7f0;
+  --color-brand-100: #e6eedd;
+  --color-brand-200: #cfdfbf;
+  --color-brand-300: #b0c898;
+  --color-brand-400: #8bad6d;
+  --color-brand-500: #68914b;
+  --color-brand-600: #4f7a3a;
+  --color-brand-700: #3f6130;
+  --color-brand-800: #2e4a25;
+  --color-brand-900: #223719;
+
+  /* The page background, previously the bare hex #fafaf8 repeated across
+     ten route files. Tokenised so the canvas is one edit, not eleven. */
+  --color-canvas: #f6f4ec;
+  --color-canvas-dark: #10120d;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-canvas);
+  color: #1b2016;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, Arial, Helvetica, sans-serif;
+}
+
+.dark body {
+  background: var(--color-canvas-dark);
+  color: #f0efe6;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  user-select: none;
+}
+
+/* brand-600 rather than brand-500: white selected text needs 4.5:1 and
+   brand-500 only reaches 3.66:1. */
+::selection {
+  background: var(--color-brand-600);
+  color: white;
+}
+
+/* Slim, unobtrusive scrollbar for a premium feel */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 0.15);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.15);
+  background-clip: content-box;
+}

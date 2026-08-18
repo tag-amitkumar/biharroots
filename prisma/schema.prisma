@@ -1,0 +1,431 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Postgres rather than SQLite: on Vercel every request is served by an
+// ephemeral function with a read-only filesystem, so a file-backed database
+// has nowhere to live and no way to persist writes. DATABASE_URL is the
+// pooled (pgbouncer) connection used by the app at runtime; DIRECT_URL is
+// the unpooled one `prisma migrate` needs, since migrations open advisory
+// locks that a transaction pooler drops.
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  customer       String
+  phone          String
+  email          String
+  address        String
+  amount         Int
+  paymentId      String
+  orderId        String
+  status         String      @default("Pending")
+  shippingMethod String      @default("Standard")
+  couponCode     String?
+  discount       Int         @default(0)
+  coinsEarned    Int         @default(0)
+  coinsRedeemed  Int         @default(0)
+  createdAt      DateTime    @default(now())
+  items          OrderItem[]
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  couponRedemption CouponRedemption?
+}
+
+model Product {
+  id          String @id @default(cuid())
+  name        String
+  description String
+  price       Int
+  image       String
+  category    String
+  stock       Int    @default(100)
+
+  // Newline-separated extra image URLs (beyond `image`, the primary/cover
+  // photo) for the product gallery.
+  images String @default("")
+
+  // JSON-encoded { "key": "value" } spec sheet, e.g. {"Origin":"India","Shelf life":"7 days"}.
+  specifications String @default("{}")
+
+  // Advanced-filter attributes. All optional/defaulted so every existing
+  // product row (and every existing create/update caller) keeps working
+  // unchanged - these are additive, not a replacement for anything.
+  brand            String?
+  mrp              Int? // Maximum retail price; mrp > price implies "on sale" and drives the discount% filter/badge.
+  organicCertified Boolean @default(false)
+  vegan            Boolean @default(false)
+  glutenFree       Boolean @default(false)
+  sugarFree        Boolean @default(false)
+  ecoFriendly      Boolean @default(false)
+  countryOfOrigin  String?
+  weight           String? // Free text ("500g", "1kg") since units vary by product type.
+
+  // Admin-configurable "Featured Products" flag (independent of a
+  // category's own `featured` flag, which marks the whole category).
+  featured Boolean @default(false)
+
+  // AI Product Description Generator output (Phase 4 AI4) - all optional/
+  // defaulted so existing products are unaffected until an admin generates
+  // and saves content. Array/object fields are JSON-encoded strings,
+  // following the same convention as `specifications` above.
+  seoTitle            String?
+  seoMetaDescription  String?
+  detailedDescription String?
+  highlights          String  @default("[]") // JSON string[]
+  keyBenefits         String  @default("[]") // JSON string[]
+  ingredients         String?
+  usageInstructions   String?
+  storageInstructions String?
+  faqs                String  @default("[]") // JSON { question, answer }[]
+
+  // AI Admin Tools output (Phase 4 AI7) - same additive convention as
+  // the AI4 fields above.
+  seoKeywords String  @default("[]") // JSON string[]
+  tags        String  @default("[]") // JSON string[]
+  imageAlt    String?
+
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  wishlists        Wishlist[]
+  reviews          Review[]
+  variants         ProductVariant[]
+  orderItems       OrderItem[]
+  recentlyViewedBy RecentlyViewed[]
+  categories       ProductCategory[]
+  reviewSummary    ReviewSummary?
+}
+
+// A cached AI Review Summary - recomputed (and this row overwritten)
+// whenever the summary is requested and `reviewCountAtGeneration` no
+// longer matches the product's actual review count, i.e. whenever a
+// review has been added or removed since it was last generated.
+model ReviewSummary {
+  id                      String   @id @default(cuid())
+  productId               String   @unique
+  reviewCountAtGeneration Int
+  avgRatingAtGeneration   Float
+  sentiment               String
+  recommendationScore     Int
+  pros                    String // JSON-encoded string[]
+  cons                    String // JSON-encoded string[]
+  aiSummary               String?
+  source                  String // "rule" | "llm"
+  updatedAt               DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// Self-referencing tree: a main category has parentId null; a subcategory
+// points to its main category via parentId. The same shape serves both
+// "category" and "subcategory" in the feature request - a subcategory page
+// is just a Category row whose parent happens to be set.
+model Category {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  description String @default("")
+  icon        String @default("") // Emoji or short icon identifier shown in nav/cards.
+  banner      String @default("") // Uploaded banner image URL (via the existing /api/upload route).
+
+  metaTitle       String @default("")
+  metaDescription String @default("")
+
+  parentId String?
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Category[] @relation("CategoryTree")
+
+  enabled        Boolean @default(true)
+  featured       Boolean @default(false)
+  showOnHomepage Boolean @default(true)
+  showInNav      Boolean @default(true)
+  sortOrder      Int     @default(0)
+  viewCount      Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products ProductCategory[]
+}
+
+// Many-to-many: a product can belong to any number of categories and
+// subcategories at once, and automatically appears on every one of them.
+model ProductCategory {
+  id String @id @default(cuid())
+
+  productId  String
+  categoryId String
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, categoryId])
+}
+
+model ProductVariant {
+  id        String @id @default(cuid())
+  productId String
+  label     String
+  price     Int
+  stock     Int    @default(100)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Wishlist {
+  id String @id @default(cuid())
+
+  userId    String
+  productId String
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+}
+
+model User {
+  id       String  @id @default(cuid())
+  name     String
+  email    String  @unique
+  // Nullable: users who sign up via Google OAuth have no password of
+  // their own - the Credentials provider's authorize() guards against a
+  // null password rather than crashing on bcrypt.compare(..., null).
+  password String?
+  role     String  @default("user")
+
+  image    String?
+  phone    String?
+  birthday DateTime?
+
+  // Loyalty / membership
+  lifetimeSpend      Int       @default(0)
+  referralCode       String?   @unique
+  wishlistShareToken String?   @unique
+  lastLoginAt        DateTime?
+  lastLoginBonusAt   DateTime?
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  reviews       Review[]
+  addresses     Address[]
+  orders        Order[]
+  savedCarts    SavedCart[]
+  notifications Notification[]
+
+  wallet            Wallet?
+  referralsMade     Referral[]         @relation("ReferralsMade")
+  referralReceived  Referral?          @relation("ReferralsReceived")
+  recentlyViewed    RecentlyViewed[]
+  couponRedemptions CouponRedemption[]
+  supportTickets    SupportTicket[]
+}
+
+model Address {
+  id         String  @id @default(cuid())
+  userId     String
+  label      String  @default("Home")
+  line1      String
+  city       String
+  state      String
+  postalCode String
+  phone      String
+  isDefault  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SavedCart {
+  id     String @id @default(cuid())
+  userId String
+  name   String
+
+  // JSON-encoded CartItem[] snapshot: [{id,name,price,image,quantity}, ...]
+  items String
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id      String  @id @default(cuid())
+  userId  String
+  message String
+  read    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  type           String // "percent" | "fixed"
+  value          Int
+  active         Boolean   @default(true)
+  minOrderAmount Int       @default(0)
+  expiresAt      DateTime?
+
+  // Usage limits: null means unlimited. maxRedemptions caps total uses
+  // across all customers; perUserLimit caps uses by a single customer.
+  maxRedemptions Int?
+  perUserLimit   Int?
+
+  createdAt DateTime @default(now())
+
+  redemptions CouponRedemption[]
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  userId    String?
+  orderId   String   @unique
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  rating    Int
+  comment   String
+  createdAt DateTime @default(now())
+
+  productId String
+  userId    String
+
+  product Product @relation(fields: [productId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+model OrderItem {
+  id String @id @default(cuid())
+
+  orderId  String
+  name     String
+  price    Int
+  quantity Int
+
+  // Nullable: historical order items predate this field, and a product can
+  // be deleted after being ordered. When present, enables real purchase
+  // co-occurrence analysis (Frequently Bought Together) instead of guessing
+  // from the name snapshot.
+  productId String?
+
+  order   Order    @relation(fields: [orderId], references: [id])
+  product Product? @relation(fields: [productId], references: [id])
+}
+
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id           String   @id @default(cuid())
+  walletId     String
+  type         String // "earn" | "redeem" | "expire" | "adjust"
+  source       String // "purchase" | "review" | "referral" | "daily_login" | "birthday" | "campaign" | "redemption" | "admin"
+  amount       Int // positive for earn/adjust-up, negative for redeem/expire/adjust-down
+  balanceAfter Int
+  note         String?
+  orderId      String?
+  createdAt    DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+}
+
+model MembershipTier {
+  id              String  @id @default(cuid())
+  name            String  @unique // "Green" | "Silver" | "Gold" | "Platinum"
+  minSpend        Int     @default(0)
+  coinMultiplier  Float   @default(1.0)
+  discountPercent Int     @default(0)
+  freeShipping    Boolean @default(false)
+  earlyAccess     Boolean @default(false)
+  birthdayBonus   Int     @default(0)
+  sortOrder       Int     @default(0)
+  badgeColor      String  @default("#16a34a")
+
+  updatedAt DateTime @updatedAt
+}
+
+model Referral {
+  id             String    @id @default(cuid())
+  referrerId     String
+  referredId     String?   @unique
+  code           String
+  status         String    @default("pending") // "pending" | "completed"
+  referrerReward Int?
+  referredReward Int?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  referrer User  @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred User? @relation("ReferralsReceived", fields: [referredId], references: [id], onDelete: Cascade)
+}
+
+model RecentlyViewed {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  viewedAt  DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model LoyaltyConfig {
+  id                    String   @id @default("singleton")
+  coinsPerRupee         Float    @default(0.1)
+  redemptionValue       Float    @default(0.5)
+  minRedemptionCoins    Int      @default(100)
+  reviewBonus           Int      @default(20)
+  dailyLoginBonus       Int      @default(5)
+  birthdayBonus         Int      @default(100)
+  referralReferrerBonus Int      @default(150)
+  referralReferredBonus Int      @default(100)
+  coinExpiryDays        Int?
+  updatedAt             DateTime @updatedAt
+}
+
+// Real escalation target for the AI Shopping Assistant's "talk to a human"
+// action - a genuinely working feature that needs no external service
+// (unlike email/SMS, which aren't configured in this environment): the
+// conversation transcript is stored and an admin resolves it from
+// /admin/support, rather than the widget pretending to hand off to a human
+// it can't actually reach.
+model SupportTicket {
+  id      String  @id @default(cuid())
+  userId  String?
+  name    String
+  email   String
+  message String // The user's question plus the preceding chat transcript, for context.
+  status  String  @default("Open") // "Open" | "Resolved"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
